@@ -9,7 +9,9 @@ from sklearn.preprocessing import LabelEncoder
 %matplotlib inline
 
 DATA_PATH = 'original_datas'
-def read_csv(file_name):
+def read_csv(file_name: str) -> pd.DataFrame:
+    """Read csv files by putting file names.
+    """
     file = pd.read_csv(f"{DATA_PATH}/{file_name}.csv")
     return file
 
@@ -24,19 +26,14 @@ shops.loc[shops['city_name']=='!Якутск','city_name'] = 'Якутск'
 
 sales_train['date_sales'] = sales_train['item_cnt_day'] * sales_train['item_price']
 
-mon_shop_item_cnt = sales_train[
-    ['date_block_num','shop_id','item_id','item_cnt_day']
-].groupby(
-    ['date_block_num','shop_id','item_id'],
-    as_index=False
-).sum().rename(columns={'item_cnt_day':'mon_shop_item_cnt'})
+def mon_shop_item(date_data: str, mon_data: str) -> pd.DataFrame:
+    """Get monthly sales data from dayly sales data.
+    """
+    df = sales_train[['date_block_num','shop_id','item_id',date_data]].groupby(['date_block_num','shop_id','item_id'], as_index=False).sum().rename(columns={date_data: mon_data})
+    return df
 
-mon_shop_item_sales = sales_train[
-    ['date_block_num','shop_id','item_id','date_sales']
-].groupby(
-    ['date_block_num','shop_id','item_id'],
-    as_index=False
-).sum().rename(columns={'date_sales':'mon_shop_item_sales'})
+mon_shop_item_cnt = mon_shop_item('item_cnt_day', 'mon_shop_item_cnt')
+mon_shop_item_sales = mon_shop_item('date_sales', 'mon_shop_item_sales')
 
 train_full_comb = pd.DataFrame()
 for i in range(35):
@@ -44,7 +41,9 @@ for i in range(35):
     mid['date_block_num'] = i
     train_full_comb = pd.concat([train_full_comb,mid],axis=0)
     
-def merge(merging_df_1, merging_df_2, merged_column_lists):
+def merge(merging_df_1: pd.DataFrame, merging_df_2 :pd.DataFrame, merged_column_lists: list) ->pd.DataFrame:
+    """Merge 2 pd.DataFrame on a columns list of merged_column_lists.
+    """
     df = pd.merge(merging_df_1, merging_df_2, on= merged_column_lists,how='left')
     return df
     
@@ -80,7 +79,7 @@ for obj_col in obj_col_list:
 y = train_['mon_shop_item_cnt']
 X = train_.drop(columns=['date_block_num','mon_shop_item_cnt', 'mon_shop_item_sales'])
 
-clf = lgb.LGBMClassifier()
+clf = lgb.LGBMRegressor()
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=0)
 clf.fit(X_train, y_train)
 y_pred = clf.predict(X_test)
