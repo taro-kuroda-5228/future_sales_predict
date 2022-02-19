@@ -1,13 +1,11 @@
 import datetime
 
 import lightgbm as lgb
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
+from movwin import MovingWindowKFold
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import LabelEncoder
-from movwin import MovingWindowKFold
 
 DATA_PATH = "original_datas"
 
@@ -22,11 +20,12 @@ file_names = ["items", "item_categories", "shops", "sales_train", "test"]
 for file_name in file_names:
     locals()[file_name] = read_csv(file_name)
 
-item_categories["big_category_name"] = item_categories["item_category_name"].map(
-    lambda x: x.split(" - ")[0]
-)
+item_categories["big_category_name"] = [
+    x.split(" - ")[0] for x in item_categories["item_category_name"]
+]
 
-shops["city_name"] = shops["shop_name"].map(lambda x: x.split(" ")[0])
+
+shops["city_name"] = [x.split(" ")[0] for x in shops["shop_name"]]
 shops.loc[shops["city_name"] == "!Якутск", "city_name"] = "Якутск"
 
 sales_train["date_sales"] = sales_train["item_cnt_day"] * sales_train["item_price"]
@@ -92,9 +91,7 @@ for lag_col in lag_col_list:
         )
         train = pd.concat([train, df_lag[set_col_name]], axis=1)
 
-train_ = train[
-    (train["date_block_num"] <= 33) & (train["date_block_num"] >= 12)
-].reset_index(drop=True)
+train_ = train[train["date_block_num"] <= 33].reset_index(drop=True)
 test_ = train[train["date_block_num"] == 34].reset_index(drop=True)
 
 obj_col_list = ["big_category_name", "city_name"]
@@ -104,10 +101,14 @@ for obj_col in obj_col_list:
     test_[obj_col] = pd.DataFrame({obj_col: le.fit_transform(test_[obj_col])})
 
 y = train_["mon_shop_item_cnt"]
-X = train_.drop(columns=["mon_shop_item_cnt"])
+X = train_.drop(columns=["mon_shop_item_cnt"]).fillna(0)
 
 folds = MovingWindowKFold(ts_column="date_block_num", n_splits=5)
+import lightgbm as lgb
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
+clf = lgb.LGBMRegressor()
+scores_lgb = []
 for train_index, test_index in folds.split(X):
     X_train, X_test = (
         X.iloc[
@@ -118,15 +119,31 @@ for train_index, test_index in folds.split(X):
         ],
     )
     y_train, y_test = y[train_index], y[test_index]
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_test)
+    mae = mean_absolute_error(y_test, y_pred)
+    mse = mean_squared_error(y_test, y_pred)
+    scores_lgb.append([mae, mse])
 
-clf = lgb.LGBMRegressor()
-clf.fit(X_train, y_train)
-y_pred = clf.predict(X_test)
 
-X_test["item_cnt_month"] = y_pred
+def mean_scores(scores_list):
+    """Get mean MAE and MSE scores in 5 times tests.
+    Args:
+        score_list: results of 5 time tests, shape of [mae,mse]
+    """
+    sum = 0
+    for i in range(len(scores_list)):
+        sum += scores_list[i][0]
+    mae_avg = sum / 5
 
-submission = merge(
-    test_, X_test[["shop_id", "item_id", "item_cnt_month"]], ["shop_id", "item_id"]
-)
-submission = merge(submission, test, ["shop_id", "item_id"])
-submission = submission[["ID", "item_cnt_month"]]
+    sum = 0
+    for i in range(len(scores_list)):
+        sum += scores_list[i][1]
+    mse_avg = sum / 5
+    avg_list = [mae_avg, mse_avg]
+    return avg_list
+
+
+mean_score = mean_scores(scores_lgb)
+print(f"MAE:{mean_score[0]}, MSE:{mean_score[1]}")
+# MAE:0.05164586260217431, MSE:0.12601170078959073
